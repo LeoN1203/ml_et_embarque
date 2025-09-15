@@ -1,0 +1,44 @@
+name: Build and Deploy Docker Image
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Convert repository name to lowercase
+        id: vars
+        run: |
+          echo "repo_lower=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.SECRET_TOKEN }}
+
+      - name: Build Docker image
+        run: |
+          docker build -t ghcr.io/${{ env.repo_lower }}:latest .
+
+      - name: Push Docker image
+        run: |
+          docker push ghcr.io/${{ env.repo_lower }}:latest
+
+      - name: Deploy to VM
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ${{ secrets.SSH_PRIVATE_KEY }} user@20.229.168.115 << 'EOF'
+            echo "${{ secrets.SECRET_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            docker pull ghcr.io/${{ env.repo_lower }}:latest
+            docker stop my-app || true
+            docker rm my-app || true
+            docker run -d --name my-app -p 7899:7899 ghcr.io/${{ env.repo_lower }}:latest
+          EOF
